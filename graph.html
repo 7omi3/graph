@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>S<sub>n</sub> Graph Visualizer</title>
+  <script src="https://d3js.org/d3.v7.min.js"></script>
+  <style>
+    /* ----- Layout & basic look ----- */
+    html, body {
+      margin: 0;
+      height: 100%;
+      font-family: system-ui, sans-serif;
+    }
+    #wrapper {
+      display: flex;
+      flex-direction: column;
+      height: 100%;        /* full viewport */
+    }
+    #controls {
+      padding: 10px;
+      background: #f0f0f0;
+    }
+    #controls label {
+      font-weight: bold;
+    }
+    #controls input {
+      width: 60px;
+      padding: 2px;
+      margin-right: 8px;
+    }
+    svg {
+      flex: 1;              /* fill remaining space */
+      border-top: 1px solid #ccc;
+      background: #fafafa;
+    }
+    .link {
+      stroke: #999;
+      stroke-opacity: 0.6;
+    }
+    .node circle {
+      stroke: #000;
+      stroke-width: 1px;
+      cursor: pointer;
+    }
+    .node text {
+      pointer-events: none;
+      font-size: 10px;
+      text-anchor: middle;
+      dy: 3px;
+    }
+  </style>
+</head>
+<body>
+  <div id="controls">
+    <label for="nInput">n:</label>
+    <input id="nInput" type="number" min="1" value="5" />
+    <button id="generateBtn">Generate</button>
+  </div>
+  <div id="wrapper">
+    <svg id="graph"></svg>
+  </div>
+
+  <script>
+    const input = d3.select('#nInput');
+    const generateBtn = d3.select('#generateBtn');
+    const svg = d3.select('#graph');
+    const wrapper = document.getElementById('wrapper');
+
+    // Responsive size
+    function resize() {
+      svg
+        .attr('width', wrapper.clientWidth)
+        .attr('height', wrapper.clientHeight - document.getElementById('controls').clientHeight);
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    // Build S matrix in JS and derive edges for M-I
+    function buildEdges(n) {
+      const edges = [];
+      for (let i = 0; i < n; i++) {
+        for (let j = i + 1; j < n; j++) {
+          const i1 = i + 1, j1 = j + 1;
+          let connected = false;
+          if ((i1 === 1 && (j1 === 2 || j1 === 3)) || (j1 === 1 && (i1 === 2 || i1 === 3))) {
+            connected = true;
+          } else if (i1 >= 2 && j1 >= 2 && Math.abs(i1 - j1) === 2) {
+            connected = true;
+          }
+          if (connected) edges.push({ source: i, target: j });
+        }
+      }
+      return edges;
+    }
+
+    // Vertex‑color rule
+    //   • vertex 1  → its own color      (group 0)
+    //   • {2k,2k+1} → same color, k ≥ 1  (group k)
+    // Map groups 0..G-1 evenly along Turbo gradient
+    function getGroup(id) {
+      return id === 0 ? 0 : Math.floor((id + 1) / 2);
+    }
+    function getColorScale(n) {
+      const numGroups = Math.ceil((n + 1) / 2);
+      return d3.scaleSequential([0, numGroups - 1], d3.interpolateTurbo);
+    }
+
+    // Main generator
+    function generate(n) {
+      svg.selectAll('*').remove();
+      const edges = buildEdges(n);
+      const nodes = Array.from({ length: n }, (_, i) => ({ id: i }));
+      const colorScale = getColorScale(n);
+
+      const link = svg.append('g')
+        .attr('class', 'links')
+        .selectAll('line')
+        .data(edges)
+        .enter().append('line')
+        .attr('class', 'link');
+
+      const node = svg.append('g')
+        .attr('class', 'nodes')
+        .selectAll('g')
+        .data(nodes)
+        .enter().append('g')
+        .attr('class', 'node')
+        .call(d3.drag()
+          .on('start', dragstarted)
+          .on('drag', dragged)
+          .on('end', dragended)
+        );
+
+      node.append('circle')
+        .attr('r', 12)
+        .attr('fill', d => colorScale(getGroup(d.id)));
+
+      node.append('text')
+        .text(d => d.id + 1);
+
+      const simulation = d3.forceSimulation(nodes)
+        .force('link', d3.forceLink(edges).id(d => d.id).distance(80).strength(1))
+        .force('charge', d3.forceManyBody().strength(-300))
+        .force('center', d3.forceCenter(wrapper.clientWidth / 2, (wrapper.clientHeight + 40) / 2))
+        .force('collision', d3.forceCollide(20))
+        .velocityDecay(0.2);  // stiffer physics = less springy
+
+      simulation.on('tick', () => {
+        link
+          .attr('x1', d => d.source.x)
+          .attr('y1', d => d.source.y)
+          .attr('x2', d => d.target.x)
+          .attr('y2', d => d.target.y);
+        node
+          .attr('transform', d => `translate(${d.x},${d.y})`);
+      });
+
+      function dragstarted(event, d) {
+        if (!event.active) simulation.alphaTarget(0.3).restart();
+        d.fx = d.x;
+        d.fy = d.y;
+      }
+      function dragged(event, d) {
+        d.fx = event.x;
+        d.fy = event.y;
+      }
+      function dragended(event, d) {
+        if (!event.active) simulation.alphaTarget(0);
+        d.fx = null;
+        d.fy = null;
+      }
+    }
+
+    // Hook up button
+    generateBtn.on('click', () => {
+      const n = Math.max(1, parseInt(input.property('value'), 10));
+      generate(n);
+    });
+
+    // Initial draw
+    generate(parseInt(input.property('value'), 10));
+  </script>
+</body>
+</html>
