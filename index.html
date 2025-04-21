@@ -15,170 +15,170 @@
       display: flex;
       flex-direction: column;
       height: 100%;        /* full viewport */
+      overflow: hidden;
     }
     #controls {
-      padding: 10px;
+      padding: 8px;
       background: #f0f0f0;
+      box-shadow: 0 1px 2px rgba(0,0,0,0.1);
     }
-    #controls label {
-      font-weight: bold;
+    #graph {
+      flex: 1;
     }
-    #controls input {
-      width: 60px;
-      padding: 2px;
-      margin-right: 8px;
+    /* vertex circles */
+    .node {
+      stroke: #000;
+      stroke-width: 1.5px;
+      cursor: grab;
     }
-    svg {
-      flex: 1;              /* fill remaining space */
-      border-top: 1px solid #ccc;
-      background: #fafafa;
+    .node:active {
+      cursor: grabbing;
     }
+    /* edge lines */
     .link {
       stroke: #999;
       stroke-opacity: 0.6;
+      stroke-width: 1.5px;
+      cursor: move;
     }
-    .node circle {
-      stroke: #000;
-      stroke-width: 1px;
-      cursor: pointer;
-    }
-    .node text {
+    /* labels */
+    .label {
+      font-size: 12px;
+      fill: #000;
       pointer-events: none;
-      font-size: 10px;
-      text-anchor: middle;
-      dy: 3px;
     }
   </style>
 </head>
 <body>
-  <div id="controls">
-    <label for="nInput">n:</label>
-    <input id="nInput" type="number" min="1" value="5" />
-    <button id="generateBtn">Generate</button>
-  </div>
   <div id="wrapper">
+    <div id="controls">
+      <label>n: <input type="number" id="nInput" min="1" value="5" style="width:60px"/></label>
+      <button id="generateBtn">Generate</button>
+    </div>
     <svg id="graph"></svg>
   </div>
 
   <script>
-    const input = d3.select('#nInput');
-    const generateBtn = d3.select('#generateBtn');
     const svg = d3.select('#graph');
-    const wrapper = document.getElementById('wrapper');
+    const width = () => window.innerWidth;
+    const height = () => window.innerHeight - document.getElementById('controls').clientHeight;
+    let simulation;
 
-    // Responsive size
-    function resize() {
-      svg
-        .attr('width', wrapper.clientWidth)
-        .attr('height', wrapper.clientHeight - document.getElementById('controls').clientHeight);
-    }
-    window.addEventListener('resize', resize);
-    resize();
-
-    // Build S matrix in JS and derive edges for M-I
-    function buildEdges(n) {
-      const edges = [];
+    function buildGraph(n) {
+      const nodes = d3.range(n).map(i => ({id: i}));
+      const links = [];
       for (let i = 0; i < n; i++) {
         for (let j = i + 1; j < n; j++) {
           const i1 = i + 1, j1 = j + 1;
-          let connected = false;
-          if ((i1 === 1 && (j1 === 2 || j1 === 3)) || (j1 === 1 && (i1 === 2 || i1 === 3))) {
-            connected = true;
-          } else if (i1 >= 2 && j1 >= 2 && Math.abs(i1 - j1) === 2) {
-            connected = true;
+          if ((i1 === 1 && j1 === 2) || (i1 === 1 && j1 === 3) || (i1 >= 2 && j1 >= 2 && Math.abs(i1 - j1) === 2)) {
+            links.push({source: i, target: j});
           }
-          if (connected) edges.push({ source: i, target: j });
         }
       }
-      return edges;
-    }
 
-    // Vertex‑color rule
-    //   • vertex 1  → its own color      (group 0)
-    //   • {2k,2k+1} → same color, k ≥ 1  (group k)
-    // Map groups 0..G-1 evenly along Turbo gradient
-    function getGroup(id) {
-      return id === 0 ? 0 : Math.floor((id + 1) / 2);
-    }
-    function getColorScale(n) {
-      const numGroups = Math.ceil((n + 1) / 2);
-      return d3.scaleSequential([0, numGroups - 1], d3.interpolateTurbo);
-    }
-
-    // Main generator
-    function generate(n) {
+      // clear old
       svg.selectAll('*').remove();
-      const edges = buildEdges(n);
-      const nodes = Array.from({ length: n }, (_, i) => ({ id: i }));
-      const colorScale = getColorScale(n);
+      svg
+        .attr('width', width())
+        .attr('height', height());
 
+      // Color logic
+      const getGroup  = id => (id === 0 ? 0 : Math.floor((id + 1) / 2));
+      const numGroups = Math.ceil((n + 1) / 2);
+      const colorScale = d3.scaleSequential([0, numGroups - 1], d3.interpolateTurbo);
+      const nodeColor = d => colorScale(getGroup(d.id));
+
+      // forces
+      const linkForce = d3.forceLink(links).id(d => d.id).distance(80).strength(0.8);
+      const chargeForce = d3.forceManyBody().strength(-120);
+      const collideForce = d3.forceCollide(20).strength(1);
+      const centerForce = d3.forceCenter(width() / 2, height() / 2);
+
+      simulation = d3.forceSimulation(nodes)
+        .force('link', linkForce)
+        .force('charge', chargeForce)
+        .force('collide', collideForce)
+        .force('center', centerForce)
+        .velocityDecay(0.05)
+        .alphaDecay(0.02);
+
+      // draw links
       const link = svg.append('g')
         .attr('class', 'links')
         .selectAll('line')
-        .data(edges)
+        .data(links)
         .enter().append('line')
-        .attr('class', 'link');
+          .attr('class', 'link');
 
+      // draw nodes
       const node = svg.append('g')
         .attr('class', 'nodes')
-        .selectAll('g')
+        .selectAll('circle')
         .data(nodes)
-        .enter().append('g')
-        .attr('class', 'node')
-        .call(d3.drag()
-          .on('start', dragstarted)
-          .on('drag', dragged)
-          .on('end', dragended)
-        );
+        .enter().append('circle')
+          .attr('class', 'node')
+          .attr('r', 12)
+          .attr('fill', nodeColor)
+          .call(d3.drag()
+            .on('start', (event, d) => {
+              if (!event.active) simulation.alphaTarget(0.3).restart();
+              d.fx = d.x;
+              d.fy = d.y;
+            })
+            .on('drag', (event, d) => {
+              d.fx = event.x;
+              d.fy = event.y;
+            })
+            .on('end', (event, d) => {
+              d.fx = d.x;
+              d.fy = d.y;
+              simulation.alphaTarget(0);
+            })
+          );
 
-      node.append('circle')
-        .attr('r', 12)
-        .attr('fill', d => colorScale(getGroup(d.id)));
+      // draw labels
+      const label = svg.append('g')
+        .attr('class', 'labels')
+        .selectAll('text')
+        .data(nodes)
+        .enter().append('text')
+          .attr('class', 'label')
+          .attr('text-anchor', 'middle')
+          .attr('dy', '0.35em')
+          .text(d => d.id + 1);
 
-      node.append('text')
-        .text(d => d.id + 1);
-
-      const simulation = d3.forceSimulation(nodes)
-        .force('link', d3.forceLink(edges).id(d => d.id).distance(80).strength(1))
-        .force('charge', d3.forceManyBody().strength(-300))
-        .force('center', d3.forceCenter(wrapper.clientWidth / 2, (wrapper.clientHeight + 40) / 2))
-        .force('collision', d3.forceCollide(20))
-        .velocityDecay(0.2);  // stiffer physics = less springy
-
+      // update positions on tick
       simulation.on('tick', () => {
         link
           .attr('x1', d => d.source.x)
           .attr('y1', d => d.source.y)
           .attr('x2', d => d.target.x)
           .attr('y2', d => d.target.y);
+
         node
-          .attr('transform', d => `translate(${d.x},${d.y})`);
+          .attr('cx', d => d.x)
+          .attr('cy', d => d.y);
+
+        label
+          .attr('x', d => d.x)
+          .attr('y', d => d.y);
       });
 
-      function dragstarted(event, d) {
-        if (!event.active) simulation.alphaTarget(0.3).restart();
-        d.fx = d.x;
-        d.fy = d.y;
-      }
-      function dragged(event, d) {
-        d.fx = event.x;
-        d.fy = event.y;
-      }
-      function dragended(event, d) {
-        if (!event.active) simulation.alphaTarget(0);
-        d.fx = null;
-        d.fy = null;
-      }
+      // handle resize
+      window.addEventListener('resize', () => {
+        svg.attr('width', width()).attr('height', height());
+        simulation.force('center', d3.forceCenter(width() / 2, height() / 2));
+        simulation.alpha(0.1).restart();
+      });
     }
 
-    // Hook up button
-    generateBtn.on('click', () => {
-      const n = Math.max(1, parseInt(input.property('value'), 10));
-      generate(n);
+    document.getElementById('generateBtn').addEventListener('click', () => {
+      const n = +document.getElementById('nInput').value;
+      if (n >= 1) buildGraph(n);
     });
 
-    // Initial draw
-    generate(parseInt(input.property('value'), 10));
+    // initial render
+    buildGraph(+document.getElementById('nInput').value);
   </script>
 </body>
 </html>
